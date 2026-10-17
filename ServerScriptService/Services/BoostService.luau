@@ -6,6 +6,9 @@
 --   player attributes Buff<Kind> / Buff<Kind>Until. Luck and Gather share the attributes the daily reward uses, so the stronger of
 --   two sources applies (never both added). Re-buying the same kind extends the time up to MaxMinutes; it never raises the amount.
 --   Server boosts: one slot per boost id in memory, published to GameState (SB_<id> = expiry) so every client shows the timer.
+--   FULL VALUE: a purchase always adds its full Minutes. The store refuses to open checkout when that would push the boost past
+--   MaxMinutes (BoostService.CanBuy), so the cap holds for normal buying; a receipt that arrives anyway (two buyers racing for the
+--   same server boost, or a retried receipt) is still granted in full rather than charging for nothing.
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
@@ -104,7 +107,7 @@ function BoostService.StartServerBoost(player: Player?, id: string): (boolean, s
 	local now = os.time()
 	local cur = serverBoosts[id]
 	local base = if cur and cur.Until > now then cur.Until else now
-	local untilT = math.min(base + def.Minutes * 60, now + def.MaxMinutes * 60)
+	local untilT = base + def.Minutes * 60 -- full purchased time (the MaxMinutes cap is enforced before checkout, see CanBuy)
 	local buyer = if player then player.DisplayName else "Someone"
 	serverBoosts[id] = { Until = untilT, Buyer = if cur and cur.Until > now then cur.Buyer else buyer }
 	publish(id)
@@ -141,7 +144,7 @@ function BoostService.StartPersonalBoost(player: Player, key: string): (boolean,
 	local now = os.time()
 	local cur = d.Boosts[def.Kind]
 	local base = if cur and cur.Until > now then cur.Until else now
-	local untilT = math.min(base + def.Minutes * 60, now + def.MaxMinutes * 60)
+	local untilT = base + def.Minutes * 60 -- full purchased time (the MaxMinutes cap is enforced before checkout, see CanBuy)
 	-- never replace a stronger source of the same kind (e.g. a daily buff) with a weaker one
 	local amount = def.Amount
 	local existing = player:GetAttribute("Buff" .. def.Kind)
@@ -156,6 +159,34 @@ function BoostService.StartPersonalBoost(player: Player, key: string): (boolean,
 		S.UpgradeService.RefreshMovement(player)
 	end
 	return true, def.Name
+end
+
+-- May the store open checkout for this boost? Only when the purchase can add its FULL time without passing MaxMinutes,
+-- so nobody pays for a boost that is already (nearly) at its cap. kind = "Boost" | "ServerBoost".
+function BoostService.CanBuy(player: Player, kind: string, key: string): (boolean, string?)
+	local now = os.time()
+	if kind == "ServerBoost" then
+		local def = MonetizationConfig.ServerBoosts[key]
+		if not def then
+			return false, "Unknown item"
+		end
+		local remaining = BoostService.ServerRemaining(key)
+		if remaining + def.Minutes * 60 > def.MaxMinutes * 60 then
+			return false, string.format("%s is already near its %d-minute limit. Try again in %d min.", def.Name, def.MaxMinutes, math.ceil((remaining + def.Minutes * 60 - def.MaxMinutes * 60) / 60))
+		end
+	elseif kind == "Boost" then
+		local def = MonetizationConfig.Boosts[key]
+		local d = S.PlayerDataService.Get(player)
+		if not def or not d then
+			return false, "Unavailable"
+		end
+		local cur = d.Boosts[def.Kind]
+		local remaining = if type(cur) == "table" and cur.Until and cur.Until > now then cur.Until - now else 0
+		if remaining + def.Minutes * 60 > def.MaxMinutes * 60 then
+			return false, string.format("%s is already near its %d-minute limit. Try again in %d min.", def.Name, def.MaxMinutes, math.ceil((remaining + def.Minutes * 60 - def.MaxMinutes * 60) / 60))
+		end
+	end
+	return true, nil
 end
 
 -- Re-applies saved, still-running personal boosts after a (re)join.
