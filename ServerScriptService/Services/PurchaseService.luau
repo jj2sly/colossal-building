@@ -70,6 +70,8 @@ local function grantProduct(player: Player, kind: string, def: any): boolean
 end
 
 ------------------------------------------------------------------ receipts
+local inFlight: { [string]: boolean } = {} -- receipt ids currently granting/saving (Roblox can re-invoke while we yield)
+
 local function remember(d: any, id: string)
 	local r = d.Purchases.Receipts
 	r[id] = os.time()
@@ -102,9 +104,22 @@ function PurchaseService.ProcessReceipt(receipt: any, sim: any?): Enum.ProductPu
 	if not d then
 		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
+	if S.PlayerDataService.IsSaveBlocked(player) then
+		-- their profile failed to load this session: nothing we grant here could be saved, and a later session would grant it
+		-- again. Leave the receipt pending; Roblox re-offers it when they join a server where their data loads.
+		Net.Event("Notify"):FireClient(player, "Warn", "Your purchase will be delivered the next time your data loads (rejoin).", 6)
+		return Enum.ProductPurchaseDecision.NotProcessedYet
+	end
 	local id = tostring(receipt.PurchaseId)
+	if inFlight[id] then
+		return Enum.ProductPurchaseDecision.NotProcessedYet -- the first call is still granting / saving this receipt
+	end
 	if d.Purchases.Receipts[id] then
-		return Enum.ProductPurchaseDecision.PurchaseGranted -- already handled: never grant twice
+		-- already granted (never grant twice). Acknowledge only once that record is safely in the store.
+		inFlight[id] = true
+		local saved = S.PlayerDataService.SaveNow(player)
+		inFlight[id] = nil
+		return if saved then Enum.ProductPurchaseDecision.PurchaseGranted else Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 	local kind, def
 	if sim then
@@ -123,9 +138,14 @@ function PurchaseService.ProcessReceipt(receipt: any, sim: any?): Enum.ProductPu
 		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 	S.PlayerDataService.MarkDirty(player)
-	local ok = pcall(S.PlayerDataService.SaveNow, player)
+	-- Acknowledge only after the receipt record + grant are actually in the store. If the save fails we return NotProcessedYet:
+	-- the receipt id stays recorded in memory (a retry in this server re-saves instead of re-granting) and the profile stays
+	-- dirty, so the next autosave / leave save persists it; Roblox's retry then finds the id and acknowledges without a 2nd grant.
+	inFlight[id] = true
+	local okSave, saved = pcall(S.PlayerDataService.SaveNow, player)
+	inFlight[id] = nil
 	S.PlayerDataService.Sync(player)
-	return if ok then Enum.ProductPurchaseDecision.PurchaseGranted else Enum.ProductPurchaseDecision.NotProcessedYet
+	return if okSave and saved then Enum.ProductPurchaseDecision.PurchaseGranted else Enum.ProductPurchaseDecision.NotProcessedYet
 end
 
 ------------------------------------------------------------------ passes
@@ -176,6 +196,13 @@ function PurchaseService.Begin(player: Player, kind: string, key: string): (bool
 	if not def then
 		return false, "Unknown item"
 	end
+	if kind == "Boost" or kind == "ServerBoost" then
+		-- never open checkout for a boost that could not add its full time (no paying Robux for nothing)
+		local can, why = S.BoostService.CanBuy(player, kind, key)
+		if not can then
+			return false, why or "Not available right now"
+		end
+	end
 	if id <= 0 then
 		if devSimulationAllowed() then
 			local ok, msg = PurchaseService.Simulate(player, kind, key)
@@ -215,8 +242,10 @@ function PurchaseService.Start()
 		if not wasPurchased then
 			return
 		end
+		-- PromptGamePassPurchaseFinished is raised by Roblox on the server, so wasPurchased is trustworthy here; UserOwnsGamePassAsync
+		-- can return a cached "false" right after a purchase, which used to leave a paid pass ungranted until the next join.
 		local pass = MonetizationConfig.PassByProductId(passId)
-		if pass and verifyPass(player, pass) then
+		if pass then
 			PurchaseService.GrantPass(player, pass.Key)
 			Net.Event("Notify"):FireClient(player, "Success", pass.Name .. " unlocked. Thank you!", 5)
 		end

@@ -219,20 +219,23 @@ local function saveRaw(player: Player, profile: Profile, release: boolean): bool
 	if not store then
 		return false
 	end
+	local wrote = false
 	local ok, err = pcall(function()
 		(store :: DataStore):UpdateAsync(key, function(old)
 			-- Refuse to overwrite if another server has taken the session.
 			if old and old.Session and old.Session.JobId ~= game.JobId and os.time() - (old.Session.Time or 0) < LOCK_TTL then
+				wrote = false
 				return nil
 			end
 			snapshot.Session = if release then nil else { JobId = game.JobId, Time = os.time() }
+			wrote = true
 			return snapshot
 		end)
 	end)
 	if not ok then
 		warn("[PlayerData] save failed for", player.Name, err)
 	end
-	return ok
+	return ok and wrote -- true only if the data actually reached the store (a refused session-lock write is not a save)
 end
 
 -- A player who left while their profile was loading: loadRaw already stamped this server's session lock, and nothing will
@@ -531,11 +534,18 @@ function PlayerDataService.DebugReadStored(userId: number): (any, string?)
 	return result, nil
 end
 
-function PlayerDataService.SaveNow(player: Player)
+-- Returns true only when the profile was actually written (receipt handling relies on this).
+function PlayerDataService.SaveNow(player: Player): boolean
 	local p = profiles[player]
 	if p then
-		saveRaw(player, p, false)
+		return saveRaw(player, p, false)
 	end
+	return false
+end
+
+function PlayerDataService.IsSaveBlocked(player: Player): boolean
+	local p = profiles[player]
+	return p ~= nil and p.SaveBlocked
 end
 
 return PlayerDataService
