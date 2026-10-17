@@ -596,7 +596,7 @@ local function drawMasterArchive()
 				local secs = rec.FastestCompletion
 				Menu.stat(sg, "Completed", tostring(rec.TimesCompleted or 0), 1)
 				Menu.stat(sg, "Best share", string.format("%.1f%%", rec.BestContributionPct or 0), 2)
-				Menu.stat(sg, "Fastest", if secs then string.format("%d:%02d", secs // 60, secs % 60) else "-", 3)
+				Menu.stat(sg, "Fastest", if secs then Format.Time(secs) else "-", 3)
 			else
 				-- unrecorded: what it takes (concise, no hard numbers)
 				Menu.section(inner, "Starts when the server is ready", 4)
@@ -652,7 +652,7 @@ local function drawForgotten()
 		local secs = rec.FastestCompletion
 		Menu.stat(sg, "Completed", tostring(rec.TimesCompleted or 0), 1)
 		Menu.stat(sg, "Best share", string.format("%.1f%%", rec.BestContributionPct or 0), 2)
-		Menu.stat(sg, "Fastest", if secs then string.format("%d:%02d", secs // 60, secs % 60) else "-", 3)
+		Menu.stat(sg, "Fastest", if secs then Format.Time(secs) else "-", 3)
 	end
 end
 
