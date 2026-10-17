@@ -44,7 +44,8 @@ local function checkPair(a: Player, b: Player)
 			return a:IsFriendsWith(b.UserId)
 		end)
 	end
-	if ok and isFriend then
+	-- the web call yields: if either player left meanwhile, don't re-insert them (PlayerRemoving already cleaned up)
+	if ok and isFriend and a.Parent and b.Parent then
 		friendsOf[a] = friendsOf[a] or {}
 		friendsOf[b] = friendsOf[b] or {}
 		friendsOf[a][b] = true
@@ -56,7 +57,10 @@ function FriendService.Start()
 	Players.PlayerAdded:Connect(function(player)
 		friendsOf[player] = friendsOf[player] or {}
 		for _, other in Players:GetPlayers() do
-			if other ~= player then
+			if not player.Parent then
+				return -- left while the friendship checks were running
+			end
+			if other ~= player and other.Parent then
 				checkPair(player, other)
 				publish(other)
 			end

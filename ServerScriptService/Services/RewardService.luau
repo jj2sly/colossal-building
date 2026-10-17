@@ -125,10 +125,7 @@ function RewardService.Apply(results: { Result })
 		if r.Coins > 0 and r.Player.Parent then
 			S.PlayerDataService.AddCoins(r.Player, r.Coins)
 			S.TelemetryService.Record("Reward", r.Player, r.Coins)
-			local d = S.PlayerDataService.Get(r.Player)
-			if d then
-				d.Stats.LifetimeContribution += r.Points
-			end
+			-- (LifetimeContribution is credited per deposit in BuildService.Deposit; r.Points is the sum of those same points)
 		end
 	end
 end

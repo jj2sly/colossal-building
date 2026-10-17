@@ -750,6 +750,7 @@ local function spawnVehicle(player: Player, def: any): Model?
 			seat:Sit(h)
 		end
 	end)
+	local ownerSeated = false -- only the OWNER getting out runs the exit logic (not an intruder being kicked off)
 	seat:GetPropertyChangedSignal("Occupant"):Connect(function()
 		local occ = seat.Occupant
 		if occ then
@@ -759,9 +760,14 @@ local function spawnVehicle(player: Player, def: any): Model?
 				occ.Jump = true
 				return
 			end
+			ownerSeated = true
 			prompt.Enabled = false
 			player:SetAttribute("Driving", def.Id)
 		else
+			if not ownerSeated then
+				return -- someone else touched the seat and was kicked off: never teleport the owner back to the vehicle
+			end
+			ownerSeated = false
 			prompt.Enabled = true
 			drive.VectorVelocity = Vector3.zero
 			local _, yawNow = root.CFrame:ToOrientation()

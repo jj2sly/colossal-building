@@ -772,6 +772,11 @@ function TrainingService.Start()
 		player:SetAttribute("TrainGate", 0)
 	end)
 	Players.PlayerRemoving:Connect(function(p)
+		-- free the machine a leaving player was on, or it stays "Someone is already using this" for everyone else
+		local ses = sessions[p]
+		if ses and ses.part.Parent and ses.part:GetAttribute("Occupant") == p.UserId then
+			ses.part:SetAttribute("Occupant", nil)
+		end
 		sessions[p] = nil
 		carries[p] = nil
 		padNoticeAt[p] = nil
