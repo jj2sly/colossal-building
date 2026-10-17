@@ -594,6 +594,9 @@ function BuildService.Deposit(owner: Player, resId: string, amount: number, sour
 	if accepted <= 0 then
 		return 0
 	end
+	if source == "Worker" and owner.Parent then
+		S.LaunchTelemetryService.Milestone(owner, "FirstWorkerDelivery")
+	end
 	if source == "Player" and owner.Parent then
 		local td = S.PlayerDataService.Get(owner)
 		if td and td.Tutorial and not td.Tutorial.Done then

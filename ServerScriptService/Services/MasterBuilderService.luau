@@ -87,6 +87,7 @@ function MasterBuilderService.Advance(player: Player, force: boolean?): (boolean
 	end
 	grantRewards(player, before + 1, after)
 	player:SetAttribute("MasterRank", after)
+	S.LaunchTelemetryService.Event(player, "MasterRankUp", after)
 	S.TrainingService.PublishLevels(player) -- Strength / Speed were halved: republish the levels, speed and carry
 	S.UpgradeService.RefreshMovement(player)
 	S.ResourceService.RefreshCapacity(player)

@@ -31,6 +31,7 @@ function BuildIndexService.Record(player: Player, info: CompletionInfo): boolean
 		return false
 	end
 	local pdef = BuildConfig.Get(info.BuildId)
+	S.LaunchTelemetryService.Milestone(player, "FirstCompletion") -- every completion (regular, Master, Forgotten) is recorded here
 	if pdef and pdef.Forgotten then
 		-- FORGOTTEN ARCHIVE: separate from the Index and the Master Archive; the first completion IS the personal discovery
 		local entry = S.ForgottenService.ByBuild(info.BuildId)
@@ -102,6 +103,7 @@ function BuildIndexService.Record(player: Player, info: CompletionInfo): boolean
 	BuildIndexService.CheckMilestones(player)
 	S.StatsBoardService.Touch(player)
 	if isNew then
+		S.LaunchTelemetryService.Milestone(player, "FirstIndexDiscovery")
 		Net.Event("Discovery"):FireClient(player, info.BuildId)
 	end
 	return isNew

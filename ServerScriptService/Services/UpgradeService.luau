@@ -123,6 +123,7 @@ local function onBuy(player: Player, id: any): (boolean, string)
 		return false, "Not enough Coins"
 	end
 	UpgradeService.SetLevel(player, id, level + 1)
+	S.LaunchTelemetryService.Milestone(player, "FirstUpgrade")
 	Net.Event("Effect"):FireClient(player, "UpgradeBought", { Id = id, Level = level + 1 })
 	return true, "Upgraded!"
 end

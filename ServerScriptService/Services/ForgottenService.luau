@@ -465,6 +465,7 @@ function ForgottenService.Record(player: Player, entry: any, info: any?, play: b
 	end
 	S.PlayerDataService.MarkDirty(player)
 	if new then
+		S.LaunchTelemetryService.Event(player, "ForgottenDiscovery", ForgottenService.OwnCount(player))
 		if deferReward then
 			ForgottenService.Pending[player] = entry -- paid on the first qualifying contribution of this active project
 		else
