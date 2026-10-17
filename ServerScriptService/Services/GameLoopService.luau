@@ -225,6 +225,7 @@ local function runCycle()
 		for _, pl in Players:GetPlayers() do
 			if S.PlayerDataService.IsLoaded(pl) then
 				local ok, info = pcall(S.ForgottenService.Encounter, pl, forgotten)
+				ok = ok and type(info) == "table"
 				Net.Event("Reveal"):FireClient(pl, {
 					Forgotten = true,
 					Rarity = "Forgotten",
@@ -349,6 +350,8 @@ local function runCycle()
 		Participants = #results,
 	}
 	for _, r in results do
+		-- one player's index/drop error must not cost everyone else their celebration (or abort the cycle)
+		local okR, errR = pcall(function()
 		if r.Player.Parent then
 			local isNew = false
 			if r.Eligible then
@@ -380,6 +383,10 @@ local function runCycle()
 				NewDiscovery = isNew,
 			})
 		end
+		end)
+		if not okR then
+			warn("[GameLoop] celebration error for", r.Player.Name, errR)
+		end
 	end
 	if not waitFor(view) then
 		return
@@ -410,7 +417,12 @@ function GameLoopService.Start()
 			warn("[GameLoop] cycle error:", err)
 			task.wait(2)
 		end
-		cleanupBuild()
+		-- cleanup must never take the round loop down with it
+		local okC, errC = pcall(cleanupBuild)
+		if not okC then
+			warn("[GameLoop] cleanup error:", errC)
+			task.wait(2)
+		end
 	end
 end
 

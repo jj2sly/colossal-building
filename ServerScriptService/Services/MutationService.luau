@@ -316,7 +316,10 @@ function MutationService.Start()
 		while true do
 			local r = MutationConfig.Roll
 			task.wait(rng:NextNumber(r.MinInterval, r.MaxInterval))
-			roll()
+			local ok, err = pcall(roll)
+			if not ok then
+				warn("[Mutation] roll error:", err)
+			end
 		end
 	end)
 	Players.PlayerRemoving:Connect(function(pl)

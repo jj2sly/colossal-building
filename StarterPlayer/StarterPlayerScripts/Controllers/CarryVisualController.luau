@@ -435,11 +435,12 @@ local function watch(player: Player)
 				rebuild(player)
 			end
 		end)
-		player:GetAttributeChangedSignal("Driving"):Connect(function()
-			signatures[player] = nil
-			task.delay(0.15, rebuild, player)
-		end)
 	end
+	-- connected once per player (it used to be re-connected on every respawn, stacking duplicate rebuilds)
+	player:GetAttributeChangedSignal("Driving"):Connect(function()
+		signatures[player] = nil
+		task.delay(0.15, rebuild, player)
+	end)
 	-- CarryTotal and Carry_<Res> change together on every gather/deposit tick; coalesce them
 	-- into one rebuild per frame per player
 	local queued = false

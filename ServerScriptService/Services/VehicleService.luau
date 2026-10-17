@@ -795,11 +795,12 @@ function VehicleService.Start()
 	end)
 	local function hook(player: Player)
 		player.CharacterAdded:Connect(function(char)
-			char:WaitForChild("HumanoidRootPart")
-			char:WaitForChild("Humanoid")
+			if not char:WaitForChild("HumanoidRootPart", 10) or not char:WaitForChild("Humanoid", 5) then
+				return
+			end
 			task.wait(0.4)
 			local id = player:GetAttribute("Vehicle")
-			if id and VehicleConfig.Vehicles[id] then
+			if player.Parent and id and VehicleConfig.Vehicles[id] then
 				-- after a respawn the vehicle waits beside you (you step in with the Drive prompt)
 				spawnVehicle(player, VehicleConfig.Vehicles[id])
 				S.UpgradeService.RefreshMovement(player)
@@ -824,8 +825,12 @@ function VehicleService.Start()
 		while true do
 			task.wait(2)
 			for player, m in vehicles do
+				local okV, errV = pcall(function()
 				local root = m.Parent and m.PrimaryPart
 				local id = player:GetAttribute("Vehicle")
+				if id and not VehicleConfig.Vehicles[id] then
+					id = nil
+				end
 				local seat = seatOf(m)
 				local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 				local lost = not root or root.Position.Y < -30
@@ -840,6 +845,10 @@ function VehicleService.Start()
 							end
 						end)
 					end
+				end
+				end)
+				if not okV then
+					warn("[Vehicle] recovery error:", errV)
 				end
 			end
 		end
