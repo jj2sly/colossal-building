@@ -9,12 +9,15 @@
 -- Rubble loose rocks, Stone Blocks neat cubes, Boulders spheres, Scrap bent plates, Metal Beams
 -- flanged beams, Heavy Steel striped ingots, Batteries/Power Cells glowing cylinders, Energy Cores orbs.
 -- With a vehicle, the stack sits in the vehicle's cargo bed instead of on the back.
+-- Auras (CarryFXConfig): a resource-identity emitter for the dominant family plus a mutation layer that reuses the
+-- resource's motion in the tier's colours; both scale with fill, amount and grade, and are culled by distance/budget.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ResourceConfig = require(ReplicatedStorage.Shared.Config.ResourceConfig)
 local CosmeticConfig = require(ReplicatedStorage.Shared.Config.CosmeticConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local CarryFXConfig = require(ReplicatedStorage.Shared.Config.CarryFXConfig)
 
 local CarryVisualController = {}
 
@@ -200,6 +203,179 @@ local function buildBlock(model: Model, anchor: BasePart, cf: CFrame, res: any, 
 	end
 end
 
+-- CARRY AURAS ----------------------------------------------------------------------------------------------------------
+-- One resource emitter (+ optional glow) and at most one mutation emitter per stack. Their rates are set from the stack's
+-- intensity on every carry change, and a low-rate loop switches them off for far stacks and beyond the MaxAuras budget.
+type AuraState = {
+	anchor: BasePart?,
+	family: string,
+	grade: number,
+	secret: boolean,
+	tier: string?,
+	res: ParticleEmitter?,
+	mut: ParticleEmitter?,
+	glow: PointLight?,
+	intensity: number?,
+	mutIntensity: number?,
+	visible: boolean?,
+	resAllowed: boolean?,
+}
+local auras: { [Player]: AuraState } = {}
+local SMOKE_TEX = "rbxasset://textures/particles/smoke_main.dds"
+local SPARK_TEX = "rbxasset://textures/particles/sparkles_main.dds"
+
+local function colorSeq(list: { Color3 }): ColorSequence
+	if #list == 1 then
+		return ColorSequence.new(list[1])
+	elseif #list == 2 then
+		return ColorSequence.new(list[1], list[2])
+	end
+	local kps = {}
+	for i, c in list do
+		table.insert(kps, ColorSequenceKeypoint.new((i - 1) / (#list - 1), c))
+	end
+	return ColorSequence.new(kps)
+end
+
+-- An emitter with the RESOURCE's motion. With `mut`, the mutation layer: same motion, the tier's colours/size/light.
+local function makeEmitter(a: CarryFXConfig.Aura, mut: CarryFXConfig.Mutation?, parent: BasePart): ParticleEmitter
+	local e = Instance.new("ParticleEmitter")
+	e.Name = if mut then "MB_MutAura" else "MB_ResAura"
+	-- a smoky resource (Stone grit) still sparkles in its mutation layer: tinted smoke just reads as mud
+	e.Texture = if mut and a.Texture == SMOKE_TEX then SPARK_TEX else a.Texture
+	e.Color = colorSeq(if mut then mut.Colors else a.Color)
+	local size = a.Size * (if mut then mut.SizeMult else 1)
+	e.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, size), NumberSequenceKeypoint.new(1, 0) })
+	e.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, if mut then math.min(a.Transparency, 0.2) else a.Transparency), NumberSequenceKeypoint.new(1, 1) })
+	e.LightEmission = math.min(1, a.Light + (if mut then mut.LightAdd else 0))
+	e.Lifetime = NumberRange.new(a.Life[1], a.Life[2])
+	e.Speed = NumberRange.new(a.Speed[1], a.Speed[2])
+	e.Acceleration = Vector3.new(0, a.Gravity, 0)
+	e.Drag = a.Drag
+	e.SpreadAngle = Vector2.new(a.Spread, a.Spread)
+	e.RotSpeed = NumberRange.new(-90, 90)
+	e.Rate = 0
+	e.Parent = parent
+	return e
+end
+
+local function destroyAura(a: AuraState)
+	-- the instances live inside MB_Stack and go with it; only drop the references
+	a.res, a.mut, a.glow, a.anchor = nil, nil, nil, nil
+end
+
+-- The family the aura shows: a secret resource wins (endgame loads always read as such), else the family with the most units.
+local function dominantFamily(player: Player): (string, number, boolean)
+	local units: { [string]: number } = {}
+	local grades: { [string]: number } = {}
+	local secretFam: string? = nil
+	for _, id in ResourceConfig.Order do
+		local n = player:GetAttribute("Carry_" .. id) or 0
+		local r = ResourceConfig.Resources[id]
+		if n > 0 and r then
+			units[r.Family] = (units[r.Family] or 0) + n
+			grades[r.Family] = math.max(grades[r.Family] or 1, r.Grade)
+			if r.Secret and not secretFam then
+				secretFam = r.Family
+			end
+		end
+	end
+	if secretFam then
+		return secretFam, grades[secretFam] or 1, true
+	end
+	local best, bestN = CarryFXConfig.DefaultFamily, -1
+	for fam, n in units do
+		if n > bestN then
+			best, bestN = fam, n
+		end
+	end
+	return best, grades[best] or 1, false
+end
+
+-- Mutated share of the whole load, from the replicated CarryMut string.
+local function mutatedShare(player: Player, total: number): number
+	if total <= 0 then
+		return 0
+	end
+	local m = 0
+	for _, c in parseMut(player:GetAttribute("CarryMut")) do
+		m += c[1] + c[2] + c[3]
+	end
+	return math.clamp(m / total, 0, 1)
+end
+
+-- Rates follow the CURRENT intensity; `visible` / `resAllowed` come from the culling loop.
+local function applyAura(a: AuraState)
+	local fam = CarryFXConfig.Family(a.family)
+	local cfg = CarryFXConfig.Carry
+	local vis = a.visible ~= false
+	local i = a.intensity or 0
+	local showRes = vis and a.resAllowed ~= false and i >= (if a.secret then 0 else cfg.MinIntensity)
+	if a.res then
+		a.res.Rate = if showRes then fam.Aura.Rate * i else 0
+	end
+	if a.glow then
+		a.glow.Enabled = showRes and (a.secret or i >= cfg.LightAt) -- secret loads always carry their soft light
+	end
+	if a.mut and a.tier then
+		local mdef = CarryFXConfig.Mutations[a.tier]
+		a.mut.Rate = if vis and mdef then fam.Aura.Rate * mdef.RateMult * (a.mutIntensity or 0) else 0
+	end
+end
+
+local function refreshIntensity(player: Player)
+	local a = auras[player]
+	if not a then
+		return
+	end
+	local total = player:GetAttribute("CarryTotal") or 0
+	local cap = player:GetAttribute("CarryCap") or 0
+	local family, grade, secret = dominantFamily(player)
+	a.family, a.grade, a.secret = family, grade, secret
+	a.intensity = CarryFXConfig.CarryIntensity(total, cap, grade, secret)
+	local cfg = CarryFXConfig.Carry
+	a.mutIntensity = math.max(cfg.MutShareFloor, mutatedShare(player, total)) * math.max(cfg.MutMinIntensity, a.intensity)
+	applyAura(a)
+end
+
+-- Distance culling + budget: the nearest MaxAuras stacks keep their resource layer; mutation layers stay within range.
+local function startCulling()
+	local acc = 0
+	game:GetService("RunService").Heartbeat:Connect(function(dt)
+		acc += dt
+		if acc < 1 / CarryFXConfig.Carry.UpdateHz then
+			return
+		end
+		acc = 0
+		local cam = workspace.CurrentCamera
+		if not cam then
+			return
+		end
+		local camPos = cam.CFrame.Position
+		local list = {}
+		for p, a in auras do
+			if a.anchor and a.anchor.Parent then
+				local d = (a.anchor.Position - camPos).Magnitude
+				a.visible = d <= CarryFXConfig.Carry.CullDistance
+				if a.visible then
+					table.insert(list, { a = a, d = if p == Players.LocalPlayer then -1 else d })
+				end
+			else
+				auras[p] = nil
+			end
+		end
+		table.sort(list, function(x, y)
+			return x.d < y.d
+		end)
+		for i, e in list do
+			e.a.resAllowed = i <= CarryFXConfig.Carry.MaxAuras
+		end
+		for _, a in auras do
+			applyAura(a)
+		end
+	end)
+end
+
 local function allocate(player: Player): ({ string }, number)
 	local total = player:GetAttribute("CarryTotal") or 0
 	if total <= 0 then
@@ -261,9 +437,11 @@ local function rebuild(player: Player)
 	local vehicle = if player:GetAttribute("Driving") and vFolder then vFolder:FindFirstChild(tostring(player.UserId)) else nil
 	local sig = table.concat(blocks, ",") .. "|" .. scale .. "|" .. tostring(vehicle) .. "|" .. tostring(player:GetAttribute("CosCarry")) .. "|" .. tostring(player:GetAttribute("CarryMut"))
 	if signatures[player] == sig and (#blocks == 0 or char:FindFirstChild("MB_Stack")) then
+		refreshIntensity(player) -- same blocks, but fill/amount may have moved (CarryCap, partial deposit)
 		return
 	end
 	clear(char)
+	auras[player] = nil
 	if #blocks == 0 then
 		signatures[player] = sig
 		return
@@ -320,43 +498,36 @@ local function rebuild(player: Player)
 		end
 		buildBlock(model, anchorPart :: BasePart, base * offset, res, size, tiers[i])
 	end
-	-- SECRET resources (Star Metal / Ancient Timber): a faint cool or warm shimmer, one soft light and one emitter for the stack
-	local secretKind: string? = nil
-	for _, id in blocks do
-		local rd = ResourceConfig.Resources[id]
-		if rd and rd.Secret then
-			secretKind = rd.Secret
-			break
+	-- two-layer aura (CarryFXConfig): the RESOURCE identity of the dominant family, plus the MUTATION layer painted onto
+	-- that same motion. Emitters are created once per stack; their rates follow intensity (fill, amount, grade) without a rebuild.
+	local first = model:FindFirstChildWhichIsA("BasePart", true)
+	local family, grade, secret = dominantFamily(player)
+	local aura = auras[player]
+	if aura then
+		destroyAura(aura)
+	end
+	aura = { anchor = first, family = family, grade = grade, secret = secret, tier = bestTier }
+	auras[player] = aura
+	if first and CarryFXConfig.Enabled then
+		local fam = CarryFXConfig.Family(family)
+		aura.res = makeEmitter(fam.Aura, nil, first)
+		if fam.Aura.Glow then
+			local gl = Instance.new("PointLight")
+			gl.Color = fam.Aura.Glow
+			gl.Range = CarryFXConfig.Carry.LightRange
+			gl.Brightness = CarryFXConfig.Carry.LightBrightness
+			gl.Shadows = false
+			gl.Enabled = false
+			gl.Parent = first
+			aura.glow = gl
+		end
+		if bestTier and CarryFXConfig.Mutations[bestTier] then
+			aura.mut = makeEmitter(fam.Aura, CarryFXConfig.Mutations[bestTier], first)
 		end
 	end
-	if secretKind then
-		local first = model:FindFirstChildWhichIsA("BasePart", true)
-		if first then
-			local cool = secretKind == "StarMetal"
-			local sc = if cool then Color3.fromRGB(130, 190, 255) else Color3.fromRGB(255, 208, 120)
-			local sl = Instance.new("PointLight")
-			sl.Color = sc
-			sl.Range = 8
-			sl.Brightness = 0.45
-			sl.Shadows = false
-			sl.Parent = first
-			local se = Instance.new("ParticleEmitter")
-			se.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-			se.Color = if cool then ColorSequence.new(sc, Color3.fromRGB(220, 235, 255)) else ColorSequence.new(sc, Color3.fromRGB(170, 230, 130))
-			se.LightEmission = 0.4
-			se.Rate = if cool then 4 else 3
-			se.Lifetime = NumberRange.new(1.2, 2)
-			se.Speed = NumberRange.new(0.5, 2)
-			se.SpreadAngle = Vector2.new(180, 180)
-			se.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.4), NumberSequenceKeypoint.new(1, 0) })
-			se.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.35), NumberSequenceKeypoint.new(1, 1) })
-			se.Parent = first
-		end
-	end
-	-- a mutated stack glows so you can recognise it from across the map: ONE soft light and ONE emitter for the whole stack
+	-- a mutated stack glows so you can recognise it from across the map: ONE soft light and ONE outline for the whole stack
 	if bestTier then
 		local tdef = MutationConfig.Tiers[bestTier]
-		local first = model:FindFirstChildWhichIsA("BasePart", true)
 		if first then
 			local light = Instance.new("PointLight")
 			light.Color = tdef.Color
@@ -364,17 +535,7 @@ local function rebuild(player: Player)
 			light.Brightness = if bestTier == "Golden" then 0.7 else 1.0
 			light.Shadows = false
 			light.Parent = first
-			local em = Instance.new("ParticleEmitter")
-			em.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-			em.Color = if bestTier == "Prismatic" then ColorSequence.new({ ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 150, 230)), ColorSequenceKeypoint.new(0.5, Color3.fromRGB(150, 255, 230)), ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 240, 150)) }) else ColorSequence.new(tdef.Color, tdef.Color2)
-			em.LightEmission = 0.6
-			em.Rate = if bestTier == "Prismatic" then 12 elseif bestTier == "Diamond" then 9 else 5
-			em.Lifetime = NumberRange.new(0.8, 1.4)
-			em.Speed = NumberRange.new(1, 3)
-			em.SpreadAngle = Vector2.new(180, 180)
-			em.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.55), NumberSequenceKeypoint.new(1, 0) })
-			em.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1) })
-			em.Parent = first
+			local em = aura.mut -- the mutation layer (nil if CarryFXConfig is disabled)
 			-- Diamond / Prismatic loads also get a soft outline so a hauler is recognisable from across the map (rare, so cheap)
 			if bestTier ~= "Golden" then
 				local hl = Instance.new("Highlight")
@@ -392,6 +553,10 @@ local function rebuild(player: Player)
 							hl.OutlineColor = Color3.fromHSV(h % 1, 0.55, 1)
 							hl.FillColor = Color3.fromHSV((h + 0.3) % 1, 0.4, 1)
 							light.Color = Color3.fromHSV(h % 1, 0.45, 1)
+							if em and em.Parent then
+								-- the resource's own motion keeps flowing; only its pastel hue drifts
+								em.Color = ColorSequence.new(Color3.fromHSV(h % 1, 0.45, 1), Color3.fromHSV((h + 0.35) % 1, 0.35, 1))
+							end
 							task.wait(0.1)
 						end
 					end)
@@ -423,6 +588,7 @@ local function rebuild(player: Player)
 	end
 	model.Parent = char
 	signatures[player] = sig
+	refreshIntensity(player)
 end
 
 local function watch(player: Player)
@@ -435,16 +601,17 @@ local function watch(player: Player)
 				rebuild(player)
 			end
 		end)
-		player:GetAttributeChangedSignal("Driving"):Connect(function()
-			signatures[player] = nil
-			task.delay(0.15, rebuild, player)
-		end)
 	end
+	-- connected once per player (it used to be re-connected on every respawn, stacking duplicate rebuilds)
+	player:GetAttributeChangedSignal("Driving"):Connect(function()
+		signatures[player] = nil
+		task.delay(0.15, rebuild, player)
+	end)
 	-- CarryTotal and Carry_<Res> change together on every gather/deposit tick; coalesce them
 	-- into one rebuild per frame per player
 	local queued = false
 	player.AttributeChanged:Connect(function(attr)
-		if (attr == "CarryTotal" or string.sub(attr, 1, 6) == "Carry_" or attr == "CosCarry" or attr == "CarryMut") and not queued then
+		if (attr == "CarryTotal" or string.sub(attr, 1, 6) == "Carry_" or attr == "CosCarry" or attr == "CarryMut" or attr == "CarryCap") and not queued then
 			queued = true
 			task.defer(function()
 				queued = false
@@ -465,7 +632,9 @@ function CarryVisualController.Start()
 	end
 	Players.PlayerRemoving:Connect(function(p)
 		signatures[p] = nil
+		auras[p] = nil
 	end)
+	startCulling()
 end
 
 return CarryVisualController

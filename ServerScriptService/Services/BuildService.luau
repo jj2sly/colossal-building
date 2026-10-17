@@ -298,7 +298,10 @@ function BuildService.Start()
 		while true do
 			task.wait(FLUSH_INTERVAL)
 			if dirty and active then
-				flush()
+				local ok, err = pcall(flush)
+				if not ok then
+					warn("[Build] flush error:", err)
+				end
 			end
 		end
 	end)

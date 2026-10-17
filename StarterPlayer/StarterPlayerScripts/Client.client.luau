@@ -16,6 +16,7 @@ local ORDER = {
 	"CelebrationController",
 	"CarryVisualController",
 	"BuildFXController",
+	"DepositFXController",
 	"SpectacleController",
 	"BuildShowController",
 	"AmbienceController",

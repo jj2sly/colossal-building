@@ -119,7 +119,10 @@ function ContributionService.Start()
 		while true do
 			task.wait(GameConfig.Timings.LeaderboardBroadcastInterval)
 			if dirty then
-				ContributionService.Broadcast()
+				local ok, err = pcall(ContributionService.Broadcast)
+				if not ok then
+					warn("[Contribution] broadcast error:", err)
+				end
 			end
 		end
 	end)

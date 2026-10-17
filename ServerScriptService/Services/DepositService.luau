@@ -117,6 +117,7 @@ end
 function DepositService.Start()
 	Players.PlayerRemoving:Connect(function(p)
 		notNeededNotice[p] = nil
+		lastFx[p] = nil
 	end)
 	task.spawn(function()
 		local interval = GameConfig.Site.DepositTickInterval
@@ -124,7 +125,10 @@ function DepositService.Start()
 		while true do
 			task.wait(interval)
 			local t = os.clock()
-			tick(math.min(0.5, t - last))
+			local ok, err = pcall(tick, math.min(0.5, t - last))
+			if not ok then
+				warn("[Deposit] tick error:", err) -- never let one bad tick stop deposits for the whole server
+			end
 			last = t
 		end
 	end)

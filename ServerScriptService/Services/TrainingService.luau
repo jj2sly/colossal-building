@@ -786,13 +786,14 @@ function TrainingService.Start()
 	task.spawn(function()
 		while true do
 			task.wait(1)
-			naturalTick()
+			local ok, err = pcall(naturalTick)
+			if not ok then
+				warn("[Training] natural tick error:", err)
+			end
 		end
 	end)
 
-	task.spawn(function()
-		while true do
-			task.wait(0.25)
+	local function sessionTick()
 			local t = now()
 			for player, ses in sessions do
 				local hrp, hum = bodyOf(player)
@@ -836,6 +837,14 @@ function TrainingService.Start()
 						tickTreadmills(player, hrp)
 					end
 				end
+			end
+	end
+	task.spawn(function()
+		while true do
+			task.wait(0.25)
+			local ok, err = pcall(sessionTick)
+			if not ok then
+				warn("[Training] session tick error:", err)
 			end
 		end
 	end)

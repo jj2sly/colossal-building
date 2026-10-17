@@ -131,8 +131,9 @@ function UpgradeService.Start()
 	Net.Function("BuyUpgrade").OnServerInvoke = onBuy
 	local function hookCharacter(player: Player)
 		player.CharacterAdded:Connect(function(char)
-			char:WaitForChild("Humanoid")
-			UpgradeService.RefreshMovement(player)
+			if char:WaitForChild("Humanoid", 10) then
+				UpgradeService.RefreshMovement(player)
+			end
 		end)
 		if player.Character then
 			UpgradeService.RefreshMovement(player)
