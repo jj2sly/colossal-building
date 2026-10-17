@@ -1,0 +1,18 @@
+# Roblox generated place files
+*.rbxl
+*.rbxlx
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+secrets.json
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Temporary/log files
+*.log
+*.tmp
