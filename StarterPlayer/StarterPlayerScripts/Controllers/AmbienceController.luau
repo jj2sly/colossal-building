@@ -838,7 +838,12 @@ local function updateRides(dt: number)
 		local speed = v.Magnitude
 		local k = math.clamp(speed / math.max(1, r.max), 0, 1)
 		local occupied = false
-		local seat = m:FindFirstChildWhichIsA("VehicleSeat", true)
+		-- cached: a recursive search per vehicle at 30 Hz added up with 25 vehicles out
+		local seat = (r :: any).seat
+		if not seat or not seat.Parent then
+			seat = m:FindFirstChildWhichIsA("VehicleSeat", true)
+			;(r :: any).seat = seat
+		end
 		if seat and seat.Occupant then
 			occupied = true
 		end

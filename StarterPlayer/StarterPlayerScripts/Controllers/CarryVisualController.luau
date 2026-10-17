@@ -618,16 +618,28 @@ local function watch(player: Player)
 		signatures[player] = nil
 		task.delay(0.15, rebuild, player)
 	end)
-	-- CarryTotal and Carry_<Res> change together on every gather/deposit tick; coalesce them
-	-- into one rebuild per frame per player
+	-- CarryTotal and Carry_<Res> change together on every gather/deposit tick; coalesce them into one rebuild per frame
+	-- for your own stack. OTHER players' stacks rebuild at most every REMOTE_REBUILD_GAP seconds (always ending on the
+	-- latest state): a deposit changes the block count every 0.2 s tick, and 25 players unloading at once otherwise meant
+	-- every client re-creating whole stacks (parts, welds, emitters, lights) dozens of times per second.
+	local REMOTE_REBUILD_GAP = 0.25
+	local isLocal = player == Players.LocalPlayer
 	local queued = false
+	local lastBuilt = 0
 	player.AttributeChanged:Connect(function(attr)
 		if (attr == "CarryTotal" or string.sub(attr, 1, 6) == "Carry_" or attr == "CosCarry" or attr == "CarryMut" or attr == "CarryCap") and not queued then
 			queued = true
-			task.defer(function()
+			local function run()
 				queued = false
+				lastBuilt = os.clock()
 				rebuild(player)
-			end)
+			end
+			local wait = if isLocal then 0 else lastBuilt + REMOTE_REBUILD_GAP - os.clock()
+			if wait > 0 then
+				task.delay(wait, run)
+			else
+				task.defer(run)
+			end
 		end
 	end)
 	player.CharacterAdded:Connect(hookChar)

@@ -123,9 +123,21 @@ function StatsBoardService.Refresh()
 	end
 end
 
+local refreshing = false
 function StatsBoardService.Get(): { any }
 	if os.clock() - lastRefresh > REFRESH_INTERVAL or next(cache) == nil then
-		StatsBoardService.Refresh()
+		-- single flight: while one refresh is running (several yielding GetSortedAsync / name lookups), other callers wait for
+		-- it instead of starting their own. With an empty cache, a join wave opening the menu used to fire one full refresh each.
+		if refreshing then
+			local t = os.clock()
+			while refreshing and os.clock() - t < 15 do
+				task.wait(0.2)
+			end
+		else
+			refreshing = true
+			pcall(StatsBoardService.Refresh)
+			refreshing = false
+		end
 	end
 	local out = {}
 	for _, b in StatsBoardService.Boards do
