@@ -368,6 +368,25 @@ H["Mutation.Clear"] = function()
 	return true, "Mutation piles cleared"
 end
 
+-- VFX TESTING: put a real load in your own stack (CarryVisual auras; walk into the deposit ring for the real delivery FX).
+-- Replaces what you carry. Uses ResourceService.Give, so capacity still applies.
+H["VFX.GiveLoad"] = function(p, a)
+	local res = oneOf(a.Resource, ResourceConfig.Resources)
+	local tier = oneOf(a.Tier, MutationConfig.Tiers)
+	local amount = num(a.Amount, 1, 100000)
+	if not res or not tier or not amount then
+		return fail("Unknown resource/tier or bad amount")
+	end
+	S.ResourceService.Clear(p)
+	local given = S.ResourceService.Give(p, res, amount, nil, if tier == "Normal" then nil else tier)
+	return true, string.format("Carrying %d %s %s (capacity %d)", given, tier, res, S.ResourceService.GetCapacity(p))
+end
+
+H["VFX.ClearLoad"] = function(p)
+	S.ResourceService.Clear(p)
+	return true, "Load cleared"
+end
+
 H["Event.Trigger"] = function(_p, a)
 	local def = if type(a.Id) == "string" then EventConfig.Events[a.Id] else nil
 	if not def or not def.Enabled then

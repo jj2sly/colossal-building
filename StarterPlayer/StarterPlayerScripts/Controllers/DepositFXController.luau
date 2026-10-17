@@ -185,15 +185,11 @@ local function tierColor(tier: string): Color3
 	return MutationConfig.Get(tier).Color
 end
 
-local function play(player: Player, p: Pending)
-	local root = rootOf(player)
-	if not root then
-		return
-	end
-	local isLocal = player == Players.LocalPlayer
+-- `origin` is where the hauler stands; `isLocal` deliveries skip the crowd limits.
+local function play(origin: Vector3, isLocal: boolean, p: Pending)
 	local cam = workspace.CurrentCamera
 	if not isLocal then
-		if cam and (cam.CFrame.Position - root.Position).Magnitude > D.CullDistance then
+		if cam and (cam.CFrame.Position - origin).Magnitude > D.CullDistance then
 			return
 		end
 		if not allowRemote() then
@@ -225,7 +221,7 @@ local function play(player: Player, p: Pending)
 
 	-- impact point: the deck rim toward the hauler
 	local site = GameConfig.Site
-	local flat = Vector3.new(root.Position.X - site.Center.X, 0, root.Position.Z - site.Center.Z)
+	local flat = Vector3.new(origin.X - site.Center.X, 0, origin.Z - site.Center.Z)
 	local dir = if flat.Magnitude > 0.1 then flat.Unit else Vector3.zAxis
 	local radius = math.min(D.ImpactRadius, flat.Magnitude)
 	local impact = site.Center + dir * radius + Vector3.new(0, site.PlatformTopY + D.ImpactHeight, 0)
@@ -238,7 +234,7 @@ local function play(player: Player, p: Pending)
 		count += mc.MutatedExtra
 	end
 	local dur = mc.FlightTime * fam.MoteSpeed
-	local from = root.Position + Vector3.new(0, 3, 0)
+	local from = origin + Vector3.new(0, 3, 0)
 	for i = 1, count do
 		local glow = i <= glowing and tier ~= nil
 		local jitter = Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5) * 3
@@ -276,7 +272,45 @@ local function flush(player: Player)
 		return
 	end
 	w.pending = nil
-	play(player, p)
+	local root = rootOf(player)
+	if root then
+		play(root.Position, player == Players.LocalPlayer, p)
+	end
+end
+
+-- ADMIN TESTING (AdminPanelController "VFX" tab): play a delivery locally without touching any server state.
+-- `origin` defaults to the local player; `asRemote` runs it through the other-player culling / rate limit / scale.
+function DepositFXController.Preview(resId: string, tier: string?, amount: number, origin: Vector3?, asRemote: boolean?)
+	local res = ResourceConfig.Resources[resId]
+	if not res or amount <= 0 then
+		return
+	end
+	local root = rootOf(Players.LocalPlayer)
+	local from = origin or (root and root.Position)
+	if not from then
+		return
+	end
+	local p: Pending = { amounts = { [resId] = amount }, tiers = {}, timer = false }
+	if tier and tier ~= "Normal" and CarryFXConfig.Mutations[tier] then
+		p.tiers[tier] = amount
+	end
+	play(from, not asRemote, p)
+end
+
+-- Crowd stress test: `n` simulated haulers unloading at random points around the deposit ring over `seconds`.
+function DepositFXController.Stress(n: number, seconds: number)
+	local site = GameConfig.Site
+	local ids = ResourceConfig.Order
+	for i = 1, n do
+		task.delay(math.random() * seconds, function()
+			local a = math.random() * math.pi * 2
+			local r = site.DepositOuterRadius - 6
+			local origin = site.Center + Vector3.new(math.cos(a) * r, site.PlatformTopY + 1, math.sin(a) * r)
+			local roll = math.random()
+			local tier = if roll < 0.04 then "Prismatic" elseif roll < 0.12 then "Diamond" elseif roll < 0.35 then "Golden" else nil
+			DepositFXController.Preview(ids[math.random(1, #ids)], tier, math.random(10, 120), origin, i ~= 1)
+		end)
+	end
 end
 
 local function diff(player: Player)

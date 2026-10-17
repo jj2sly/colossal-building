@@ -9,15 +9,17 @@ local UserInputService = game:GetService("UserInputService")
 
 local Net = require(ReplicatedStorage.Shared.Net)
 local UI = require(script.Parent.Parent.ClientLib.UI)
+local ResourceConfig = require(ReplicatedStorage.Shared.Config.ResourceConfig)
+local DepositFX = require(script.Parent.DepositFXController)
 
 local AdminPanelController = {}
 local T = UI.Theme
 
-local TABS = { "Builds", "Server", "Mutations", "Events", "Player", "Teleport", "Profile" }
+local TABS = { "Builds", "Server", "Mutations", "VFX", "Events", "Player", "Teleport", "Profile" }
 
 local catalog, gui, window, content, status, header
 local tabPages = {}
-local selected = { Build = nil, Variant = "Random", Tier = "Golden", Resource = "Auto", Vehicle = "None", Worker = "Builder", Project = nil, Stat = "Strength" }
+local selected = { Build = nil, Variant = "Random", Tier = "Golden", Resource = "Auto", Vehicle = "None", Worker = "Builder", Project = nil, Stat = "Strength", VfxRes = nil, VfxTier = "Normal" }
 local busy = false
 
 local function call(action, args)
@@ -204,6 +206,35 @@ local function buildTabs()
 	end
 	btn(r5, "Resource Rush", T.Blue, function() run("Event.Trigger", { Id = "ResourceRush" }) end)
 
+	-- VFX (carry auras + delivery effects, CarryFXConfig)
+	p = newPage("VFX")
+	local resOpts = {}
+	for _, id in ResourceConfig.Order do
+		table.insert(resOpts, { Id = id, Name = ResourceConfig.Resources[id].DisplayName })
+	end
+	selected.VfxRes = ResourceConfig.Order[1]
+	selector(p, "Resource", resOpts, "VfxRes")
+	selector(p, "Mutation", { "Normal", "Golden", "Diamond", "Prismatic" }, "VfxTier")
+	label(p, "Carry aura: real load (deliver it in the ring)")
+	numberBox(p, "Units", 30, "Give Load", function(n) run("VFX.GiveLoad", { Resource = selected.VfxRes, Tier = selected.VfxTier, Amount = n }) end, T.Good)
+	local rv = row(p)
+	btn(rv, "Fill To Capacity", T.Blue, function() run("VFX.GiveLoad", { Resource = selected.VfxRes, Tier = selected.VfxTier, Amount = 100000 }) end)
+	btn(rv, "Clear Load", T.Bad, function() run("VFX.ClearLoad") end)
+	label(p, "Delivery preview: local only, no rewards")
+	numberBox(p, "Units", 30, "Preview Delivery", function(n) DepositFX.Preview(selected.VfxRes, selected.VfxTier, n) end)
+	local rv2 = row(p)
+	btn(rv2, "Preview x3 sizes", nil, function()
+		for i, n in { 5, 40, 250 } do
+			task.delay((i - 1) * 1.2, DepositFX.Preview, selected.VfxRes, selected.VfxTier, n)
+		end
+	end)
+	btn(rv2, "All tiers", nil, function()
+		for i, t in { "Normal", "Golden", "Diamond", "Prismatic" } do
+			task.delay((i - 1) * 1.2, DepositFX.Preview, selected.VfxRes, t, 60)
+		end
+	end)
+	btn(rv2, "Stress: 25 haulers", T.Warn, function() DepositFX.Stress(25, 3) end)
+
 	-- EVENTS
 	p = newPage("Events")
 	local r6 = row(p)
@@ -270,7 +301,7 @@ local function buildWindow()
 	UI.list(tabs, 4, true)
 	local tabButtons = {}
 	for _, name in TABS do
-		tabButtons[name] = UI.button({ Text = name, TextSize = 13, BackgroundColor3 = T.PanelLight, Size = UDim2.fromOffset(78, 28) }, function()
+		tabButtons[name] = UI.button({ Text = name, TextSize = 13, BackgroundColor3 = T.PanelLight, Size = UDim2.fromOffset(68, 28) }, function()
 			showTab(name)
 			for n, b in tabButtons do
 				UI.setButtonColor(b, if n == name then T.Accent else T.PanelLight)
