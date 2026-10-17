@@ -20,6 +20,40 @@ do
 	end
 end
 
+-- launch sanity for monetization: free-first rules, and a single reminder while store ids are still placeholders (0 = the
+-- store shows "Coming soon" and nothing can be bought, which is safe but probably not intended on a public server)
+do
+	local MonetizationConfig = require(ReplicatedStorage.Shared.Config.MonetizationConfig)
+	local okR, problems = pcall(MonetizationConfig.FreeFirstReport)
+	if not okR then
+		warn("[MonetizationConfig] check failed: " .. tostring(problems))
+	else
+		for _, msg in problems do
+			warn("[MonetizationConfig] " .. msg)
+		end
+	end
+	local missing = {}
+	for key, p in MonetizationConfig.Passes do
+		if (p.PassId or 0) <= 0 then
+			table.insert(missing, key)
+		end
+	end
+	for key, b in MonetizationConfig.Boosts do
+		if (b.ProductId or 0) <= 0 then
+			table.insert(missing, key)
+		end
+	end
+	for key, b in MonetizationConfig.ServerBoosts do
+		if (b.ProductId or 0) <= 0 then
+			table.insert(missing, key)
+		end
+	end
+	if #missing > 0 and not game:GetService("RunService"):IsStudio() then
+		table.sort(missing)
+		warn("[MonetizationConfig] placeholder store ids (shown as Coming soon): " .. table.concat(missing, ", "))
+	end
+end
+
 local ORDER = {
 	"StateService",
 	"PlayerDataService",
