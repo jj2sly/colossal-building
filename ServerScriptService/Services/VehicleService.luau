@@ -514,6 +514,7 @@ local function applySkinTo(m: Model, skinId: string?)
 			if base then
 				p.Color = base
 				p.Material = (Enum.Material :: any)[p:GetAttribute("BaseMaterial") :: string]
+				p.Reflectance = (p:GetAttribute("BaseReflectance") :: number?) or 0
 			end
 			if base and not SKIP_NAMES[p.Name] and p.Transparency < 0.5 and p.Material ~= Enum.Material.Neon and p.Material ~= Enum.Material.Glass and select(3, base:ToHSV()) > 0.45 and (select(2, base:ToHSV()) > 0.3 or select(3, base:ToHSV()) > 0.85) then
 				local key = base:ToHex()
@@ -523,6 +524,8 @@ local function applySkinTo(m: Model, skinId: string?)
 			end
 		end
 	end
+	-- (Pass 21S) clients add the skin's premium details (underglow, beacon, beams, glints) from this attribute
+	m:SetAttribute("Skin", if skin then skinId else nil)
 	if not skin then
 		return
 	end
@@ -540,15 +543,83 @@ local function applySkinTo(m: Model, skinId: string?)
 	if keys[2] then
 		map[keys[2]] = skin.Accent
 	end
+	local stripe = 0
 	for _, p in paintParts do
 		local to = map[(p:GetAttribute("BaseColor") :: Color3):ToHex()]
 		if to then
-			p.Color = to
-			if skin.Material then
-				p.Material = skin.Material
+			local isAccent = to == skin.Accent
+			-- (Pass 21S) Stripes: alternate body panels take the accent, for a candy-cane wrap
+			if skin.Stripes and not isAccent then
+				stripe += 1
+				if stripe % 2 == 0 then
+					to, isAccent = skin.Accent, true
+				end
 			end
+			p.Color = to
+			local mat = if isAccent then (skin.AccentMaterial or skin.Material) else skin.Material
+			if mat then
+				p.Material = mat
+			end
+			p.Reflectance = if isAccent and skin.AccentMaterial == Enum.Material.Neon then 0 else (skin.Reflectance or 0)
 		end
 	end
+end
+
+-- (Pass 21S, admin tester) paint the player's live vehicle with any skin WITHOUT touching their saved data
+function VehicleService.PreviewSkin(player: Player, skinId: string?)
+	local m = VehicleService.Get(player)
+	if not m then
+		return false
+	end
+	applySkinTo(m, skinId)
+	return true
+end
+
+-- (Pass 21S, admin tester) every vehicle skin side by side on anchored display Pickups at `origin` (toggle)
+function VehicleService.SkinShowcase(origin: CFrame?): number
+	local folder = workspace:FindFirstChild("MB_Vehicles") or Instance.new("Folder")
+	folder.Name = "MB_Vehicles"
+	folder.Parent = workspace
+	local any = false
+	for _, m in folder:GetChildren() do
+		if m:GetAttribute("Showcase") then
+			m:Destroy()
+			any = true
+		end
+	end
+	if any or not origin then
+		return 0
+	end
+	local ids = { "SafetyOrange", "GoldenHaul", "NeonRacer", "CandyStripe", "MidnightBlack", "DragonScale", "MasterChrome" }
+	for i, id in ids do
+		local m = Instance.new("Model")
+		m.Name = "Showcase_" .. id
+		m:SetAttribute("Showcase", true)
+		Builders.Pickup(m)
+		local root = m.PrimaryPart :: BasePart
+		local at = origin * CFrame.new((i - 4) * 11, 0, -8) * CFrame.Angles(0, math.rad(200), 0)
+		for _, p in m:GetDescendants() do
+			if p:IsA("BasePart") then
+				p.CFrame = at * p.CFrame
+				p.Anchored = p == root
+				if p ~= root then
+					local w = Instance.new("WeldConstraint")
+					w.Part0, w.Part1 = root, p
+					w.Parent = p
+				end
+				p:SetAttribute("BaseColor", p.Color)
+				p:SetAttribute("BaseMaterial", p.Material.Name)
+				p:SetAttribute("BaseReflectance", p.Reflectance)
+			end
+		end
+		local hull = part(m, { Name = "Hull", Size = LAYOUT.Pickup.hull, Transparency = 1, CFrame = at * CFrame.new(0, 0.55, LAYOUT.Pickup.hullZ) })
+		local w = Instance.new("WeldConstraint")
+		w.Part0, w.Part1 = root, hull
+		w.Parent = hull
+		applySkinTo(m, id)
+		m.Parent = folder
+	end
+	return #ids
 end
 
 -- Re-applies the owner's equipped skin to their live vehicle (also called when the equip changes).
@@ -634,6 +705,7 @@ local function spawnVehicle(player: Player, def: any): Model?
 		if p:IsA("BasePart") then
 			p:SetAttribute("BaseColor", p.Color)
 			p:SetAttribute("BaseMaterial", p.Material.Name)
+			p:SetAttribute("BaseReflectance", p.Reflectance)
 		end
 	end
 	do

@@ -9,15 +9,19 @@ local UserInputService = game:GetService("UserInputService")
 
 local Net = require(ReplicatedStorage.Shared.Net)
 local UI = require(script.Parent.Parent.ClientLib.UI)
+local ResourceConfig = require(ReplicatedStorage.Shared.Config.ResourceConfig)
+local DepositFX = require(script.Parent.DepositFXController)
+local CarryFXMotifs = require(script.Parent.CarryFXMotifs)
+local CosmeticFX = require(script.Parent.CosmeticFX)
 
 local AdminPanelController = {}
 local T = UI.Theme
 
-local TABS = { "Builds", "Server", "Mutations", "Events", "Player", "Teleport", "Profile" }
+local TABS = { "Builds", "Server", "Mutations", "VFX", "Events", "Player", "Teleport", "Profile" }
 
 local catalog, gui, window, content, status, header
 local tabPages = {}
-local selected = { Build = nil, Variant = "Random", Tier = "Golden", Resource = "Auto", Vehicle = "None", Worker = "Builder", Project = nil, Stat = "Strength" }
+local selected = { Build = nil, Variant = "Random", Tier = "Golden", Resource = "Auto", Vehicle = "None", Worker = "Builder", Project = nil, Stat = "Strength", VfxRes = nil, VfxTier = "Normal", VfxCos = "None", VfxTrail = "None", VfxDel = "GoldenSparks", VfxSkin = "None" }
 local busy = false
 
 local function call(action, args)
@@ -204,6 +208,151 @@ local function buildTabs()
 	end
 	btn(r5, "Resource Rush", T.Blue, function() run("Event.Trigger", { Id = "ResourceRush" }) end)
 
+	-- VFX (carry auras + delivery effects, CarryFXConfig)
+	p = newPage("VFX")
+	local resOpts = {}
+	for _, id in ResourceConfig.Order do
+		table.insert(resOpts, { Id = id, Name = ResourceConfig.Resources[id].DisplayName })
+	end
+	selected.VfxRes = ResourceConfig.Order[1]
+	selector(p, "Resource", resOpts, "VfxRes")
+	selector(p, "Mutation", { "Normal", "Golden", "Diamond", "Prismatic" }, "VfxTier")
+	label(p, "Carry aura: real load (deliver it in the ring)")
+	numberBox(p, "Units", 30, "Give Load", function(n) run("VFX.GiveLoad", { Resource = selected.VfxRes, Tier = selected.VfxTier, Amount = n }) end, T.Good)
+	local rv = row(p)
+	btn(rv, "Fill To Capacity", T.Blue, function() run("VFX.GiveLoad", { Resource = selected.VfxRes, Tier = selected.VfxTier, Amount = 100000 }) end)
+	btn(rv, "Clear Load", T.Bad, function() run("VFX.ClearLoad") end)
+	label(p, "Signature carry effects (pass 21R): equip a named cosmetic on yourself, then Give Load")
+	selector(p, "Carry cosmetic", { "None", "GoldDust", "EmberGlow", "NeonGlow", "PrestigeAura" }, "VfxCos")
+	local rc = row(p)
+	btn(rc, "Equip For Test", T.Good, function() run("VFX.SetCarryFx", { Id = selected.VfxCos }) end)
+	local showcaseReturn: CFrame? = nil
+	btn(rc, "Showcase: all effects", T.Accent, function()
+		-- local only: a line-up of every named effect on a floor high above the map; press again to go back down
+		local char = Players.LocalPlayer.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		local old = workspace:FindFirstChild("MB_VFXShowcase")
+		if old then
+			old:Destroy()
+			if root and showcaseReturn then
+				char:PivotTo(showcaseReturn)
+			end
+			showcaseReturn = nil
+			return
+		end
+		if root then
+			showcaseReturn = root.CFrame
+			local origin = CFrame.new(root.Position.X, root.Position.Y + 400, root.Position.Z)
+			CarryFXMotifs.Showcase(origin, ReplicatedStorage:FindFirstChild("NPCRigs"))
+			char:PivotTo(CFrame.lookAt((origin * CFrame.new(0, 4, 14)).Position, (origin * CFrame.new(0, 4, -10)).Position))
+		end
+	end)
+	label(p, "Delivery preview: local only, no rewards")
+	numberBox(p, "Units", 30, "Preview Delivery", function(n) DepositFX.Preview(selected.VfxRes, selected.VfxTier, n) end)
+	local rv2 = row(p)
+	btn(rv2, "Preview x3 sizes", nil, function()
+		for i, n in { 5, 40, 250 } do
+			task.delay((i - 1) * 1.2, DepositFX.Preview, selected.VfxRes, selected.VfxTier, n)
+		end
+	end)
+	btn(rv2, "All tiers", nil, function()
+		for i, t in { "Normal", "Golden", "Diamond", "Prismatic" } do
+			task.delay((i - 1) * 1.2, DepositFX.Preview, selected.VfxRes, t, 60)
+		end
+	end)
+	btn(rv2, "Stress: 25 haulers", T.Warn, function() DepositFX.Stress(25, 3) end)
+
+	-- (pass 21S) premium trails, delivery effects and vehicle skins: equip on yourself (test only, never saved) or compare all
+	local skyReturn: CFrame? = nil
+	local function sky(build: (CFrame) -> Instance?, name: string)
+		-- toggles a local line-up high above the map and moves you in front of it; pressing again returns you
+		local char = Players.LocalPlayer.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		local old = workspace:FindFirstChild(name)
+		if old then
+			old:Destroy()
+			if root and skyReturn then
+				char:PivotTo(skyReturn)
+			end
+			skyReturn = nil
+			return
+		end
+		if root then
+			skyReturn = skyReturn or root.CFrame
+			local origin = CFrame.new(root.Position.X, root.Position.Y + 400, root.Position.Z)
+			build(origin)
+			char:PivotTo(CFrame.lookAt((origin * CFrame.new(0, 4, 14)).Position, (origin * CFrame.new(0, 4, -10)).Position))
+		end
+	end
+	label(p, "Premium cosmetics (pass 21S): equip on yourself, test only")
+	local trailOpts = { "None" }
+	for _, id in CosmeticFX.TrailIds do
+		table.insert(trailOpts, id)
+	end
+	selector(p, "Trail", trailOpts, "VfxTrail")
+	local rt = row(p)
+	btn(rt, "Equip Trail", T.Good, function() run("VFX.SetCosmetic", { Category = "Trail", Id = selected.VfxTrail }) end)
+	btn(rt, "Showcase: trails", T.Accent, function()
+		sky(function(o)
+			return CosmeticFX.TrailShowcase(o, ReplicatedStorage:FindFirstChild("NPCRigs"))
+		end, "MB_TrailShowcase")
+	end)
+	selector(p, "Delivery effect", CosmeticFX.DeliveryIds, "VfxDel")
+	local rd = row(p)
+	btn(rd, "Equip Delivery", T.Good, function() run("VFX.SetCosmetic", { Category = "ContributionEffect", Id = selected.VfxDel }) end)
+	btn(rd, "Play In Front", T.Blue, function()
+		local root = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if root then
+			CosmeticFX.Delivery(selected.VfxDel, (root.CFrame * CFrame.new(0, 1, -16)).Position, 1)
+		end
+	end)
+	btn(rd, "Showcase: deliveries", T.Accent, function()
+		local root = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if root then
+			local flat = CFrame.lookAt(root.Position, root.Position + Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z))
+			CosmeticFX.DeliveryShowcase(flat * CFrame.new(0, -2, 10))
+		end
+	end)
+	local skinOpts = { "None" }
+	for _, id in CosmeticFX.SkinIds do
+		table.insert(skinOpts, id)
+	end
+	selector(p, "Vehicle skin", skinOpts, "VfxSkin")
+	local rs = row(p)
+	btn(rs, "Equip Skin", T.Good, function() run("VFX.SetCosmetic", { Category = "VehicleSkin", Id = selected.VfxSkin }) end)
+	btn(rs, "Showcase: skins", T.Accent, function()
+		-- server-built display vehicles; this client hops up to them (press again to remove them and come back)
+		local char = Players.LocalPlayer.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if not root then
+			return
+		end
+		local was = skyReturn
+		local origin = CFrame.new(root.Position.X, root.Position.Y + 400, root.Position.Z)
+		run("VFX.SkinShowcase")
+		if was then
+			char:PivotTo(was)
+			skyReturn = nil
+		else
+			skyReturn = root.CFrame
+			local floor = Instance.new("Part")
+			floor.Name = "MB_SkinShowcaseFloor"
+			floor.Anchored, floor.CanCollide = true, true
+			floor.Size = Vector3.new(100, 1, 50)
+			floor.Color = Color3.fromRGB(34, 38, 48)
+			floor.Material = Enum.Material.SmoothPlastic
+			floor.CFrame = origin * CFrame.new(0, -3.5, 0)
+			floor.Parent = workspace
+			char:PivotTo(CFrame.lookAt((origin * CFrame.new(0, 2, 16)).Position, (origin * CFrame.new(0, 2, -8)).Position))
+		end
+		if was then
+			local f = workspace:FindFirstChild("MB_SkinShowcaseFloor")
+			if f then
+				f:Destroy()
+			end
+		end
+	end)
+
 	-- EVENTS
 	p = newPage("Events")
 	local r6 = row(p)
@@ -270,7 +419,7 @@ local function buildWindow()
 	UI.list(tabs, 4, true)
 	local tabButtons = {}
 	for _, name in TABS do
-		tabButtons[name] = UI.button({ Text = name, TextSize = 13, BackgroundColor3 = T.PanelLight, Size = UDim2.fromOffset(78, 28) }, function()
+		tabButtons[name] = UI.button({ Text = name, TextSize = 13, BackgroundColor3 = T.PanelLight, Size = UDim2.fromOffset(68, 28) }, function()
 			showTab(name)
 			for n, b in tabButtons do
 				UI.setButtonColor(b, if n == name then T.Accent else T.PanelLight)

@@ -368,6 +368,68 @@ H["Mutation.Clear"] = function()
 	return true, "Mutation piles cleared"
 end
 
+-- VFX TESTING: put a real load in your own stack (CarryVisual auras; walk into the deposit ring for the real delivery FX).
+-- Replaces what you carry. Uses ResourceService.Give, so capacity still applies.
+H["VFX.GiveLoad"] = function(p, a)
+	local res = oneOf(a.Resource, ResourceConfig.Resources)
+	local tier = oneOf(a.Tier, MutationConfig.Tiers)
+	local amount = num(a.Amount, 1, 100000)
+	if not res or not tier or not amount then
+		return fail("Unknown resource/tier or bad amount")
+	end
+	S.ResourceService.Clear(p)
+	local given = S.ResourceService.Give(p, res, amount, nil, if tier == "Normal" then nil else tier)
+	return true, string.format("Carrying %d %s %s (capacity %d)", given, tier, res, S.ResourceService.GetCapacity(p))
+end
+
+-- (pass 21R) equip a named carry cosmetic ON THE ATTRIBUTE ONLY (never saved) so its signature effect can be judged on a real carried stack
+H["VFX.SetCarryFx"] = function(p, a)
+	local id = a.Id
+	if id == "None" or id == nil then
+		p:SetAttribute("CosCarry", nil)
+		return true, "Carry cosmetic cleared"
+	end
+	local CosmeticConfig = require(game:GetService("ReplicatedStorage").Shared.Config.CosmeticConfig)
+	if type(id) ~= "string" or not CosmeticConfig.Get("CarryEffect", id) then
+		return fail("Unknown carry cosmetic")
+	end
+	p:SetAttribute("CosCarry", id)
+	return true, "Carry cosmetic: " .. id .. " (test only, not saved)"
+end
+
+-- (pass 21S) test any trail / delivery effect / vehicle skin on yourself: attributes and the live vehicle only, never saved data
+H["VFX.SetCosmetic"] = function(p, a)
+	local CosmeticConfig = require(game:GetService("ReplicatedStorage").Shared.Config.CosmeticConfig)
+	local cat, id = a.Category, a.Id
+	local attr = ({ Trail = "CosTrail", ContributionEffect = "CosContrib" })[cat]
+	if id ~= "None" and (type(id) ~= "string" or not CosmeticConfig.Get(cat, id)) then
+		return fail("Unknown cosmetic")
+	end
+	local value = if id == "None" then nil else id
+	if attr then
+		p:SetAttribute(attr, value)
+		return true, cat .. ": " .. tostring(value or "none") .. " (test only, not saved)"
+	elseif cat == "VehicleSkin" then
+		if not S.VehicleService.PreviewSkin(p, value) then
+			return fail("Spawn a vehicle first")
+		end
+		return true, "Vehicle skin: " .. tostring(value or "none") .. " (test only, not saved)"
+	end
+	return fail("Unknown category")
+end
+
+H["VFX.SkinShowcase"] = function(p)
+	local hrp = p.Character and p.Character:FindFirstChild("HumanoidRootPart")
+	local origin = if hrp then CFrame.new(hrp.Position.X, hrp.Position.Y + 400 - 3, hrp.Position.Z) else nil
+	local n = S.VehicleService.SkinShowcase(origin)
+	return true, if n > 0 then "Skin showcase: " .. n .. " vehicles" else "Skin showcase removed"
+end
+
+H["VFX.ClearLoad"] = function(p)
+	S.ResourceService.Clear(p)
+	return true, "Load cleared"
+end
+
 H["Event.Trigger"] = function(_p, a)
 	local def = if type(a.Id) == "string" then EventConfig.Events[a.Id] else nil
 	if not def or not def.Enabled then

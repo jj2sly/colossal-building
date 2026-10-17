@@ -168,19 +168,31 @@ local function step(dt: number)
 	if math.abs(speed) > 0.5 and groundLow < math.huge then
 		local dir = fwd * math.sign(speed)
 		local center = pos - fwd * hullZ
-		local lowOrigin = Vector3.new(center.X, groundLow + 0.2, center.Z) + dir * (hullHalf.Y - 0.8)
-		local low = workspace:Raycast(lowOrigin, dir * 2.6, rayParams)
-		if low and low.Instance.CanCollide and low.Normal.Y < 0.5 then
-			local probe = workspace:Raycast(low.Position + dir * 0.4 + Vector3.new(0, STEP_MAX + 1.5, 0), Vector3.new(0, -(STEP_MAX + 1.5), 0), rayParams)
-			-- no top within reach (> STEP_MAX) = a real wall, left to the wall rule
-			if probe then
-				local stepH = probe.Position.Y - groundLow
-				if stepH > 0.03 and stepH <= STEP_MAX then
-					local v = root.AssemblyLinearVelocity
-					if v.Y < STEP_LIFT then
-						root.AssemblyLinearVelocity = Vector3.new(v.X, STEP_LIFT, v.Z)
+		-- (Pass 21T) three low rays across the nose (centre and both sides), starting only 0.06 above the lowest ground under the hull: the hull
+		-- bottom sits ~0.05 off the ground, so a road-edge lip of 0.1 - 0.2 studs (lane edges, dashes, apron bypass, tile seams) used to pass
+		-- UNDER the old 0.2 ray and still stop the hull dead. An off-centre lip is caught by the side rays.
+		local stepH = 0
+		for _, off in { 0, -hullHalf.X * 0.8, hullHalf.X * 0.8 } do
+			local lowOrigin = Vector3.new(center.X, groundLow + 0.06, center.Z) + dir * (hullHalf.Y - 0.8) + rgt * off
+			local low = workspace:Raycast(lowOrigin, dir * 2.6, rayParams)
+			if low and low.Instance.CanCollide and low.Normal.Y < 0.5 then
+				local probe = workspace:Raycast(low.Position + dir * 0.08 + Vector3.new(0, STEP_MAX + 1.5, 0), Vector3.new(0, -(STEP_MAX + 1.5), 0), rayParams)
+				-- (probed just inside the face so even a 0.4-stud-thin curb still has its top under the probe)
+				-- no top within reach (> STEP_MAX) = a real wall, left to the wall rule
+				if probe then
+					local h = probe.Position.Y - groundLow
+					if h > 0.02 and h <= STEP_MAX then
+						stepH = math.max(stepH, h)
 					end
 				end
+			end
+		end
+		if stepH > 0 then
+			-- just enough upward speed to clear this lip (+ a little margin), never the full hop for a tiny edge
+			local lift = math.clamp(math.sqrt(2 * workspace.Gravity * (stepH + 0.15)), 4, STEP_LIFT)
+			local v = root.AssemblyLinearVelocity
+			if v.Y < lift then
+				root.AssemblyLinearVelocity = Vector3.new(v.X, lift, v.Z)
 			end
 		end
 	end

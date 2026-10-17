@@ -14,13 +14,22 @@ local Net = require(Shared.Net)
 local CosmeticConfig = require(Shared.Config.CosmeticConfig)
 local GameConfig = require(Shared.Config.GameConfig)
 
+local CosmeticFX = require(script.Parent.CosmeticFX)
+
 local CosmeticVisualController = {}
+-- (Pass 21S) premium trails: the CosmeticFX controller per player (nil = the simple fallback ribbon)
+local fxTrails: { [Player]: any } = {}
 
 local trails: { [Player]: Trail } = {}
 local MAX_BURSTS = 8
 local activeBursts = 0
 
 local function clearTrail(player: Player)
+	local c = fxTrails[player]
+	if c then
+		c.destroy()
+		fxTrails[player] = nil
+	end
 	local t = trails[player]
 	if t then
 		local a0, a1 = t.Attachment0, t.Attachment1
@@ -41,6 +50,10 @@ local function applyTrail(player: Player)
 	local def = if type(id) == "string" then CosmeticConfig.Get("Trail", id) else nil
 	local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if not def or not hrp then
+		return
+	end
+	if CosmeticFX.HasTrail(id) then
+		fxTrails[player] = CosmeticFX.Trail(hrp, id :: string)
 		return
 	end
 	local a0 = Instance.new("Attachment")
@@ -111,6 +124,14 @@ local function burst(userId: number, id: string)
 	local from = if hrp then Vector3.new(hrp.Position.X, site.Y, hrp.Position.Z) else site
 	local dir = from - site
 	local at = site + (if dir.Magnitude > 0.1 then dir.Unit * math.min(dir.Magnitude, 24) else Vector3.zero) + Vector3.new(0, 6, 0)
+	-- (Pass 21S) the premium choreographed show; other players' deliveries play a little smaller
+	if CosmeticFX.Delivery(id, at, if p == Players.LocalPlayer then 1 else 0.75) then
+		activeBursts += 1
+		task.delay(2, function()
+			activeBursts -= 1
+		end)
+		return
+	end
 	local anchor = Instance.new("Part")
 	anchor.Anchored = true
 	anchor.CanCollide = false
@@ -168,6 +189,10 @@ function CosmeticVisualController.Start()
 			return
 		end
 		acc = 0
+		for p, c in fxTrails do
+			local hrp = p.Character and p.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+			c.setMoving(hrp ~= nil and hrp.AssemblyLinearVelocity.Magnitude > 3)
+		end
 		for p, t in trails do
 			local hrp = t.Parent :: BasePart?
 			t.Enabled = hrp ~= nil and hrp.AssemblyLinearVelocity.Magnitude > 3
@@ -176,6 +201,42 @@ function CosmeticVisualController.Start()
 				sp.Enabled = t.Enabled
 			end
 		end
+	end)
+	-- (Pass 21S) vehicle skin details: every vehicle model whose Skin attribute names a premium skin gets its extras
+	task.spawn(function()
+		local folder = workspace:FindFirstChild("MB_Vehicles")
+		while not folder do
+			workspace.ChildAdded:Wait()
+			folder = workspace:FindFirstChild("MB_Vehicles")
+		end
+		local cleanups: { [Instance]: () -> () } = {}
+		local function refresh(m: Instance)
+			if cleanups[m] then
+				cleanups[m]()
+				cleanups[m] = nil
+			end
+			local skin = m:GetAttribute("Skin")
+			if m:IsA("Model") and type(skin) == "string" and m.Parent then
+				-- wait a beat for the server's welds / PrimaryPart to replicate
+				task.wait(0.3)
+				if m.Parent and m:GetAttribute("Skin") == skin then
+					cleanups[m] = CosmeticFX.DecorateVehicle(m, skin)
+				end
+			end
+		end
+		local function hook(m: Instance)
+			m:GetAttributeChangedSignal("Skin"):Connect(function()
+				task.spawn(refresh, m)
+			end)
+			task.spawn(refresh, m)
+		end
+		for _, m in folder:GetChildren() do
+			hook(m)
+		end
+		folder.ChildAdded:Connect(hook)
+		folder.ChildRemoved:Connect(function(m)
+			cleanups[m] = nil
+		end)
 	end)
 	Net.Event("Effect").OnClientEvent:Connect(function(effectId, payload)
 		if effectId == "Contribution" and type(payload) == "table" then
