@@ -89,6 +89,7 @@ local function tick(dt: number)
 					end
 				end
 				if deposited > 0 then
+					S.LaunchTelemetryService.Milestone(player, "FirstDeposit")
 					if not player:GetAttribute("Driving") then
 						S.TrainingService.NaturalDeliver(player, deposited) -- small Strength XP for hauling on foot
 					end

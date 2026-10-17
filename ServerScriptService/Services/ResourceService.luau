@@ -300,6 +300,7 @@ local function onGather(player: Player, node: BasePart, resId: string)
 		S.TelemetryService.Record("Gather", player, added, spot and spot.Id or resId)
 	end
 	if added > 0 then
+		S.LaunchTelemetryService.Milestone(player, "FirstGather")
 		Net.Event("Effect"):FireClient(player, "Gathered", { Res = resId, Amount = added, Node = node, Mut = mutTier })
 		if total(carry[player]) >= cap then
 			Net.Event("Effect"):FireClient(player, "Full", {})

@@ -103,6 +103,7 @@ local function defaults(): any
 		Daily = { LastClaimDay = 0, Claims = 0, LastSeenDay = 0 }, -- DailyConfig: UTC day numbers, claim count drives the 7-day cycle
 		Achievements = {},
 		Tutorial = { Done = false },
+		Telemetry = { Done = {}, PlaySeconds = 0, Furthest = 0 }, -- LaunchTelemetryService: one-time funnel milestones (server only)
 	}
 end
 

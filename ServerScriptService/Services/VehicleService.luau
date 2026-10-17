@@ -761,6 +761,7 @@ local function spawnVehicle(player: Player, def: any): Model?
 				return
 			end
 			ownerSeated = true
+			S.LaunchTelemetryService.Milestone(player, "FirstVehicleDrive")
 			prompt.Enabled = false
 			player:SetAttribute("Driving", def.Id)
 		else
@@ -853,6 +854,7 @@ function VehicleService.Grant(player: Player, id: string)
 	local d = S.PlayerDataService.Get(player)
 	if d then
 		d.Vehicles.Owned[id] = true
+		S.LaunchTelemetryService.Milestone(player, "FirstVehicle")
 		S.PlayerDataService.MarkDirty(player)
 	end
 end

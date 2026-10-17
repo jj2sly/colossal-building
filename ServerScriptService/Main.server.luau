@@ -24,6 +24,7 @@ local ORDER = {
 	"StateService",
 	"PlayerDataService",
 	"TelemetryService",
+	"LaunchTelemetryService",
 	"FriendService",
 	"ServerLuckService",
 	"UpgradeService",

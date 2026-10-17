@@ -521,6 +521,7 @@ function WorkerService.Spawn(player: Player)
 	local pos = stationPoint(player)
 	m:PivotTo(CFrame.new(pos))
 	m.Parent = folder
+	S.LaunchTelemetryService.Milestone(player, "FirstWorker")
 	workers[player] = { owner = player, model = m, state = "Idle", res = nil, carry = 0, until_ = 0, dest = nil, legFrom = nil, legStart = 0, pile = nil, mutTier = nil, pause = nil }
 	m:SetAttribute("State", "Idle")
 end
