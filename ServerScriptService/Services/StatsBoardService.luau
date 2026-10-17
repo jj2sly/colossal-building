@@ -153,9 +153,14 @@ function StatsBoardService.Start()
 	task.spawn(function()
 		while true do
 			task.wait(PUSH_INTERVAL)
+			-- snapshot first: the loop yields, and joins/leaves edit `dirty` meanwhile
+			local list = {}
 			for p in dirty do
-				if p.Parent then
-					push(p)
+				table.insert(list, p)
+			end
+			for _, p in list do
+				if p.Parent and dirty[p] then
+					pcall(push, p)
 					task.wait(0.2)
 				end
 			end

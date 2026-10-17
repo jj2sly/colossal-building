@@ -235,6 +235,23 @@ local function saveRaw(player: Player, profile: Profile, release: boolean): bool
 	return ok
 end
 
+-- A player who left while their profile was loading: loadRaw already stamped this server's session lock, and nothing will
+-- save (and release) it, so clear it now or their next server sees the profile as locked for LOCK_TTL and blocks saving.
+local function releaseLock(player: Player)
+	if useMock or not store then
+		return
+	end
+	pcall(function()
+		(store :: DataStore):UpdateAsync(keyFor(player), function(old)
+			if old and old.Session and old.Session.JobId == game.JobId then
+				old.Session = nil
+				return old
+			end
+			return nil
+		end)
+	end)
+end
+
 local function applyPublicAttributes(player: Player, data: any)
 	player:SetAttribute("Coins", math.floor(data.Coins))
 	local ls = player:FindFirstChild("leaderstats")
@@ -268,11 +285,15 @@ local function onPlayerAdded(player: Player)
 			break
 		end
 		if not player.Parent then
-			return
+			break
 		end
 		task.wait(attempt * 1.5)
 	end
 	if not player.Parent then
+		if data ~= nil then
+			releaseLock(player)
+		end
+		profiles[player] = nil
 		return
 	end
 	if err ~= nil and data == nil then
@@ -334,7 +355,11 @@ function PlayerDataService.Start()
 			for player, profile in profiles do
 				if profile.Dirty then
 					profile.Dirty = false
-					task.spawn(saveRaw, player, profile, false)
+					task.spawn(function()
+						if not saveRaw(player, profile, false) and not profile.SaveBlocked and profiles[player] == profile then
+							profile.Dirty = true -- retry on the next autosave instead of silently dropping the changes
+						end
+					end)
 				end
 			end
 		end
